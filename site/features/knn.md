@@ -1,13 +1,14 @@
 # KNN queries
 
 The most common use-case for vectors in databases is for K-nearest-neighbors (KNN) queries.
-You'll have a table of vectors, and you'll want to find the K closest
+You'll have a table of vectors, and you'll want to find the K closest vectors to a query vector.
 
-Currently there are two ways to to perform KNN queries with `sqlite-vec`:
-With `vec0` virtual tables and "manually" with regular tables.
+There are two ways to perform KNN queries with `sqlite-vec`:
+- **`vec0` virtual tables** - Faster, more compact, supports [IVF indexing](/features/ivf) for large datasets
+- **Manual with scalar functions** - More flexible, works with regular tables
 
-The `vec0` virtual table is faster and more compact, but is less flexible and requires `JOIN`s back to your source tables.
-The "manual" method is more flexible and
+The `vec0` virtual table is recommended for most use cases. For very large datasets (100K+ vectors),
+consider enabling [IVF (Inverted File Index)](/features/ivf) for approximate nearest neighbor search.
 
 
 

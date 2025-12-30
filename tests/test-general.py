@@ -1,5 +1,6 @@
 import sqlite3
 from collections import OrderedDict
+
 import pytest
 
 
@@ -12,14 +13,10 @@ def test_shadow(db, snapshot):
         "create virtual table v using vec0(a float[1], partition text partition key, metadata text, +name text, chunk_size=8)"
     )
     assert exec(db, "select * from sqlite_master order by name") == snapshot()
-    assert (
-        exec(db, "select * from pragma_table_list where type = 'shadow'") == snapshot()
-    )
+    assert exec(db, "select * from pragma_table_list where type = 'shadow' order by name") == snapshot()
 
     db.execute("drop table v;")
-    assert (
-        exec(db, "select * from pragma_table_list where type = 'shadow'") == snapshot()
-    )
+    assert exec(db, "select * from pragma_table_list where type = 'shadow' order by name") == snapshot()
 
 
 def test_info(db, snapshot):
@@ -50,9 +47,7 @@ def exec(db, sql, parameters=[]):
 def vec0_shadow_table_contents(db, v):
     shadow_tables = [
         row[0]
-        for row in db.execute(
-            "select name from sqlite_master where name like ? order by 1", [f"{v}_%"]
-        ).fetchall()
+        for row in db.execute("select name from sqlite_master where name like ? order by 1", [f"{v}_%"]).fetchall()
     ]
     o = {}
     for shadow_table in shadow_tables:

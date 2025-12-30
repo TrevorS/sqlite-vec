@@ -1,7 +1,13 @@
+.DEFAULT_GOAL := help
 
-COMMIT=$(shell git rev-parse HEAD)
+.PHONY: help all loadable static cli clean setup test test-all test-unit test-property \
+        asan coverage test-asan test-coverage fuzz-build fuzz-vector fuzz-knn quality \
+        format lint analyze analyze-tidy test-valgrind test-strict install uninstall wasm
+
+help: ## Show this help
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
+
 VERSION=$(shell cat VERSION)
-DATE=$(shell date +'%FT%TZ%z')
 
 INSTALL_LIB_DIR = /usr/local/lib
 INSTALL_INCLUDE_DIR = /usr/local/include
@@ -13,6 +19,29 @@ endif
 ifndef AR
 AR=ar
 endif
+
+# Strict warnings for high code quality
+# Note: -Wconversion is omitted because SQLite's API uses int for sizes
+# while C standard library uses size_t, causing 100+ false positives
+WARNINGS = \
+	-Wall -Wextra -Wpedantic \
+	-Wshadow \
+	-Wdouble-promotion \
+	-Wformat=2 \
+	-Wundef \
+	-Wcast-qual \
+	-Wcast-align \
+	-Wwrite-strings \
+	-Wstrict-prototypes \
+	-Wold-style-definition \
+	-Wmissing-prototypes \
+	-Wredundant-decls \
+	-Wnested-externs \
+	-Winit-self \
+	-Wswitch-enum
+
+# Strict warnings for quality checks (same as WARNINGS now)
+WARNINGS_STRICT = $(WARNINGS)
 
 ifeq ($(shell uname -s),Darwin)
 CONFIG_DARWIN=y
@@ -36,12 +65,6 @@ LOADABLE_EXTENSION=dll
 endif
 
 
-ifdef python
-PYTHON=$(python)
-else
-PYTHON=python3
-endif
-
 ifndef OMIT_SIMD
 	ifeq ($(shell uname -sm),Darwin x86_64)
 	CFLAGS += -mavx -DSQLITE_VEC_ENABLE_AVX
@@ -49,18 +72,15 @@ ifndef OMIT_SIMD
 	ifeq ($(shell uname -sm),Darwin arm64)
 	CFLAGS += -mcpu=apple-m1 -DSQLITE_VEC_ENABLE_NEON
 	endif
+	ifeq ($(shell uname -sm),Linux x86_64)
+	CFLAGS += -mavx -DSQLITE_VEC_ENABLE_AVX
+	endif
 endif
 
 ifdef USE_BREW_SQLITE
 	SQLITE_INCLUDE_PATH=-I/opt/homebrew/opt/sqlite/include
 	SQLITE_LIB_PATH=-L/opt/homebrew/opt/sqlite/lib
 	CFLAGS += $(SQLITE_INCLUDE_PATH) $(SQLITE_LIB_PATH)
-endif
-
-ifdef IS_MACOS_ARM
-RENAME_WHEELS_ARGS=--is-macos-arm
-else
-RENAME_WHEELS_ARGS=
 endif
 
 prefix=dist
@@ -72,11 +92,11 @@ TARGET_STATIC=$(prefix)/libsqlite_vec0.a
 TARGET_STATIC_H=$(prefix)/sqlite-vec.h
 TARGET_CLI=$(prefix)/sqlite3
 
-loadable: $(TARGET_LOADABLE)
-static: $(TARGET_STATIC)
-cli: $(TARGET_CLI)
+loadable: $(TARGET_LOADABLE) ## Build loadable extension (.so/.dylib)
+static: $(TARGET_STATIC) ## Build static library
+cli: $(TARGET_CLI) ## Build sqlite3 CLI with vec0
 
-all: loadable static cli
+all: loadable static cli ## Build all targets
 
 OBJS_DIR=$(prefix)/.objs
 LIBS_DIR=$(prefix)/.libs
@@ -95,7 +115,7 @@ $(BUILD_DIR): $(prefix)
 $(TARGET_LOADABLE): sqlite-vec.c sqlite-vec.h $(prefix)
 	$(CC) \
 		-fPIC -shared \
-		-Wall -Wextra \
+		$(WARNINGS) \
 		-Ivendor/ \
 		-O3 \
 		$(CFLAGS) \
@@ -158,46 +178,196 @@ sqlite-vec.h: sqlite-vec.h.tmpl VERSION
 	VERSION_PATCH=$$(echo $$VERSION | cut -d. -f3 | cut -d- -f1) \
 	envsubst < $< > $@
 
-clean:
-	rm -rf dist
+clean: ## Remove build artifacts
+	rm -rf dist .venv .pytest_cache .coverage htmlcov
 
+# ============================================================================
+# Testing and Quality Targets
+# ============================================================================
+
+# Static analysis with clang-tidy
+analyze: analyze-tidy ## Run static analysis
+
+analyze-tidy: ## Run clang-tidy static analysis
+	@echo "Running clang-tidy..."
+	clang-tidy sqlite-vec.c -- -Ivendor/ -DSQLITE_VEC_ENABLE_AVX 2>&1 | tee $(prefix)/clang-tidy-report.txt
+	@echo "Report saved to $(prefix)/clang-tidy-report.txt"
+
+# ASan + UBSan build for catching memory errors and undefined behavior
+TARGET_LOADABLE_ASAN=$(prefix)/vec0-asan.$(LOADABLE_EXTENSION)
+asan: $(TARGET_LOADABLE_ASAN)
+
+$(TARGET_LOADABLE_ASAN): sqlite-vec.c sqlite-vec.h $(prefix)
+	$(CC) \
+		-fPIC -shared \
+		-Wall -Wextra \
+		-Ivendor/ \
+		-g -O1 \
+		-fsanitize=address,undefined \
+		-fno-omit-frame-pointer \
+		$(CFLAGS) \
+		$< -o $@
+
+# Coverage build for measuring test coverage
+TARGET_LOADABLE_COV=$(prefix)/vec0-cov.$(LOADABLE_EXTENSION)
+coverage: $(TARGET_LOADABLE_COV)
+
+$(TARGET_LOADABLE_COV): sqlite-vec.c sqlite-vec.h $(prefix)
+	$(CC) \
+		-fPIC -shared \
+		-Wall -Wextra \
+		-Ivendor/ \
+		-g -O0 \
+		--coverage -fprofile-arcs -ftest-coverage \
+		$(CFLAGS) \
+		$< -o $@
+
+# Run tests with ASan
+test-asan: $(TARGET_LOADABLE_ASAN)
+	ASAN_OPTIONS=detect_leaks=1:abort_on_error=1 \
+	LD_PRELOAD=$$(gcc -print-file-name=libasan.so) \
+	uv run pytest tests/test-loadable.py tests/test-ivf.py tests/test-edge-cases.py -v
+
+# Run tests with coverage and generate report using gcovr
+test-coverage: $(TARGET_LOADABLE_COV) ## Run tests with C code coverage
+	@echo "Running tests with coverage instrumentation..."
+	@rm -f *.gcda $(prefix)/*.gcda
+	@cp $(TARGET_LOADABLE_COV) $(TARGET_LOADABLE)
+	uv run pytest tests/test-loadable.py tests/test-ivf.py tests/test-general.py \
+		tests/test-edge-cases.py tests/test-error-paths.py -v
+	@echo "Generating coverage report..."
+	uv run --group dev gcovr --root . --filter sqlite-vec.c \
+		--exclude-unreachable-branches --exclude-throw-branches \
+		--html-details $(prefix)/coverage.html \
+		--xml $(prefix)/coverage.xml \
+		--txt $(prefix)/coverage.txt \
+		--print-summary
+	@echo ""
+	@echo "Coverage reports saved to:"
+	@echo "  HTML: $(prefix)/coverage.html"
+	@echo "  XML:  $(prefix)/coverage.xml (for CI integration)"
+	@echo "  TXT:  $(prefix)/coverage.txt"
+
+# Strict warnings build - catches more potential issues
+TARGET_LOADABLE_STRICT=$(prefix)/vec0-strict.$(LOADABLE_EXTENSION)
+test-strict: $(TARGET_LOADABLE_STRICT) ## Build with strict warnings (quality check)
+	@echo "Strict warnings build successful!"
+
+$(TARGET_LOADABLE_STRICT): sqlite-vec.c sqlite-vec.h $(prefix)
+	@echo "Building with strict warnings..."
+	$(CC) \
+		-fPIC -shared \
+		$(WARNINGS_STRICT) \
+		-Ivendor/ \
+		-O2 -g \
+		$(CFLAGS) \
+		$< -o $@ 2>&1 | tee $(prefix)/strict-warnings.txt
+	@if [ -s $(prefix)/strict-warnings.txt ]; then \
+		echo "Warnings found (see $(prefix)/strict-warnings.txt)"; \
+	fi
+
+# Valgrind memory check (requires valgrind installed)
+TARGET_LOADABLE_DEBUG=$(prefix)/vec0-debug.$(LOADABLE_EXTENSION)
+test-valgrind: $(TARGET_LOADABLE_DEBUG) ## Run tests under Valgrind (memory check)
+	@echo "Running tests under Valgrind..."
+	@cp $(TARGET_LOADABLE_DEBUG) $(TARGET_LOADABLE)
+	valgrind --leak-check=full --show-leak-kinds=all --track-origins=yes \
+		--error-exitcode=1 --suppressions=valgrind.supp \
+		uv run pytest tests/test-loadable.py tests/test-ivf.py -v -x 2>&1 | \
+		tee $(prefix)/valgrind-report.txt
+	@echo "Valgrind report saved to $(prefix)/valgrind-report.txt"
+
+$(TARGET_LOADABLE_DEBUG): sqlite-vec.c sqlite-vec.h $(prefix)
+	$(CC) \
+		-fPIC -shared \
+		$(WARNINGS) \
+		-Ivendor/ \
+		-g -O0 \
+		$(CFLAGS) \
+		$< -o $@
+
+# Build fuzz targets (requires clang with libFuzzer)
+FUZZ_CC=clang
+TARGET_FUZZ_VECTOR=$(prefix)/fuzz_vector_parse
+TARGET_FUZZ_KNN=$(prefix)/fuzz_knn_query
+
+fuzz-build: $(TARGET_FUZZ_VECTOR) $(TARGET_FUZZ_KNN)
+
+$(TARGET_FUZZ_VECTOR): fuzz/fuzz_vector_parse.c sqlite-vec.c sqlite-vec.h $(prefix)
+	$(FUZZ_CC) \
+		-g -O1 \
+		-fsanitize=fuzzer,address,undefined \
+		-Ivendor/ -I. \
+		-DSQLITE_CORE \
+		vendor/sqlite3.c sqlite-vec.c $< \
+		-o $@ -lm
+
+$(TARGET_FUZZ_KNN): fuzz/fuzz_knn_query.c sqlite-vec.c sqlite-vec.h $(prefix)
+	$(FUZZ_CC) \
+		-g -O1 \
+		-fsanitize=fuzzer,address,undefined \
+		-Ivendor/ -I. \
+		-DSQLITE_CORE \
+		vendor/sqlite3.c sqlite-vec.c $< \
+		-o $@ -lm
+
+# Run fuzzers (Ctrl+C to stop)
+fuzz-vector: $(TARGET_FUZZ_VECTOR)
+	mkdir -p fuzz/corpus/vector
+	$< fuzz/corpus/vector -max_len=4096 -timeout=5
+
+fuzz-knn: $(TARGET_FUZZ_KNN)
+	mkdir -p fuzz/corpus/knn
+	$< fuzz/corpus/knn -max_len=8192 -timeout=10
+
+# Full quality check
+quality: analyze test-strict test-asan test-coverage ## Run all quality checks
+	@echo "Quality checks complete"
 
 FORMAT_FILES=sqlite-vec.h sqlite-vec.c
-format: $(FORMAT_FILES)
+format: $(FORMAT_FILES) ## Format C and Python source files
 	clang-format -i $(FORMAT_FILES)
-	black tests/test-loadable.py
+	uv run --group dev ruff format tests/ scripts/
 
 lint: SHELL:=/bin/bash
-lint:
-	diff -u <(cat $(FORMAT_FILES)) <(clang-format $(FORMAT_FILES))
+lint: ## Run linters (C and Python)
+	@echo "Checking C formatting..."
+	@diff -u <(cat $(FORMAT_FILES)) <(clang-format $(FORMAT_FILES)) || (echo "C files need formatting: make format" && exit 1)
+	@echo "Checking Python..."
+	uv run --group dev ruff check tests/ scripts/
+	uv run --group dev ruff format --check tests/ scripts/
 
 progress:
 	deno run --allow-read=sqlite-vec.c scripts/progress.ts
 
 
-evidence-of:
-	@echo "EVIDENCE-OF: V$(shell printf "%05d" $$((RANDOM % 100000)))_$(shell printf "%05d" $$((RANDOM % 100000)))"
-
-test:
-	sqlite3 :memory: '.read test.sql'
-
-.PHONY: version loadable static test clean gh-release evidence-of install uninstall
-
 publish-release:
 	./scripts/publish-release.sh
 
-# -k test_vec0_update
+setup: ## Install Python dependencies with uv
+	uv sync --group test
+
+test: loadable ## Run all Python tests
+	uv run pytest tests/test-loadable.py tests/test-metadata.py tests/test-partition-keys.py tests/test-auxiliary.py tests/test-general.py tests/test-ivf.py -v
+
+test-property: loadable ## Run property-based tests
+	uv run pytest tests/test-property.py -v --hypothesis-seed=0
+
+test-all: loadable ## Run all tests including property tests
+	uv run pytest tests/ -v --ignore=tests/test-correctness.py
+
+test-unit: ## Run C unit tests
+	@mkdir -p $(prefix)
+	$(CC) tests/test-unit.c sqlite-vec.c -I./ -Ivendor -DSQLITE_CORE -DSQLITE_VEC_UNIT_TEST -lsqlite3 -lm -o $(prefix)/test-unit && $(prefix)/test-unit
+
 test-loadable: loadable
-	$(PYTHON) -m pytest -vv -s -x tests/test-*.py
+	uv run pytest -vv -s -x tests/test-*.py --ignore=tests/test-correctness.py
 
 test-loadable-snapshot-update: loadable
-	$(PYTHON) -m pytest -vv tests/test-loadable.py --snapshot-update
+	uv run pytest -vv tests/test-loadable.py --snapshot-update
 
 test-loadable-watch:
 	watchexec --exts c,py,Makefile --clear -- make test-loadable
-
-test-unit:
-	$(CC) tests/test-unit.c sqlite-vec.c -I./ -Ivendor -o $(prefix)/test-unit && $(prefix)/test-unit
 
 site-dev:
 	npm --prefix site run dev

@@ -1,7 +1,8 @@
-import pytest
+import json
 import sqlite3
 from collections import OrderedDict
-import json
+
+import pytest
 
 
 def test_constructor_limit(db, snapshot):
@@ -17,12 +18,8 @@ def test_constructor_limit(db, snapshot):
 
 
 def test_normal(db, snapshot):
-    db.execute(
-        "create virtual table v using vec0(vector float[1], b boolean, n int, f float, t text, chunk_size=8)"
-    )
-    assert exec(
-        db, "select * from sqlite_master where type = 'table' order by name"
-    ) == snapshot(name="sqlite_master")
+    db.execute("create virtual table v using vec0(vector float[1], b boolean, n int, f float, t text, chunk_size=8)")
+    assert exec(db, "select * from sqlite_master where type = 'table' order by name") == snapshot(name="sqlite_master")
 
     assert vec0_shadow_table_contents(db, "v") == snapshot()
 
@@ -49,9 +46,7 @@ def test_normal(db, snapshot):
 
 
 def test_text_knn(db, snapshot):
-    db.execute(
-        "create virtual table v using vec0(vector float[1], name text, chunk_size=8)"
-    )
+    db.execute("create virtual table v using vec0(vector float[1], name text, chunk_size=8)")
     assert vec0_shadow_table_contents(db, "v") == snapshot()
     INSERT = "insert into v(vector, name) values (?, ?)"
     db.execute(
@@ -124,9 +119,7 @@ def test_text_knn(db, snapshot):
 
 
 def test_long_text_updates(db, snapshot):
-    db.execute(
-        "create virtual table v using vec0(vector float[1], name text, chunk_size=8)"
-    )
+    db.execute("create virtual table v using vec0(vector float[1], name text, chunk_size=8)")
     assert vec0_shadow_table_contents(db, "v") == snapshot()
     INSERT = "insert into v(vector, name) values (?, ?)"
     exec(db, INSERT, [b"\x11\x11\x11\x11", "123456789a12"])
@@ -136,9 +129,7 @@ def test_long_text_updates(db, snapshot):
 
 
 def test_long_text_knn(db, snapshot):
-    db.execute(
-        "create virtual table v using vec0(vector float[1], name text, chunk_size=8)"
-    )
+    db.execute("create virtual table v using vec0(vector float[1], name text, chunk_size=8)")
     INSERT = "insert into v(vector, name) values (?, ?)"
     exec(db, INSERT, ["[1]", "aaaa"])
     exec(db, INSERT, ["[2]", "aaaaaaaaaaaa_aaa"])
@@ -169,14 +160,10 @@ def test_long_text_knn(db, snapshot):
 
 
 def test_types(db, snapshot):
-    db.execute(
-        "create virtual table v using vec0(vector float[1], b boolean, n int, f float, t text, chunk_size=8)"
-    )
+    db.execute("create virtual table v using vec0(vector float[1], b boolean, n int, f float, t text, chunk_size=8)")
     INSERT = "insert into v(vector, b, n, f, t) values (?, ?, ?, ?, ?)"
 
-    assert exec(db, INSERT, [b"\x11\x11\x11\x11", 1, 1, 1.1, "test"]) == snapshot(
-        name="legal"
-    )
+    assert exec(db, INSERT, [b"\x11\x11\x11\x11", 1, 1, 1.1, "test"]) == snapshot(name="legal")
 
     # fmt: off
     assert exec(db, INSERT, [b"\x11\x11\x11\x11", 'illegal', 1, 1.1, 'test']) == snapshot(name="illegal-type-boolean")
@@ -185,15 +172,11 @@ def test_types(db, snapshot):
     assert exec(db, INSERT, [b"\x11\x11\x11\x11", 1, 1, 1.1, 420]) == snapshot(name="illegal-type-text")
     # fmt: on
 
-    assert exec(db, INSERT, [b"\x11\x11\x11\x11", 44, 1, 1.1, "test"]) == snapshot(
-        name="illegal-boolean"
-    )
+    assert exec(db, INSERT, [b"\x11\x11\x11\x11", 44, 1, 1.1, "test"]) == snapshot(name="illegal-boolean")
 
 
 def test_updates(db, snapshot):
-    db.execute(
-        "create virtual table v using vec0(vector float[1], b boolean, n int, f float, t text, chunk_size=8)"
-    )
+    db.execute("create virtual table v using vec0(vector float[1], b boolean, n int, f float, t text, chunk_size=8)")
     INSERT = "insert into v(rowid, vector, b, n, f, t) values (?, ?, ?, ?, ?, ?)"
 
     exec(db, INSERT, [1, b"\x11\x11\x11\x11", 1, 1, 1.1, "test1"])
@@ -202,55 +185,38 @@ def test_updates(db, snapshot):
     assert exec(db, "select * from v") == snapshot(name="1-init-contents")
     assert vec0_shadow_table_contents(db, "v") == snapshot(name="1-init-shadow")
 
-    assert exec(
-        db, "UPDATE v SET b = 0, n = 11, f = 11.11, t = 'newtest1' where rowid = 1"
-    )
+    assert exec(db, "UPDATE v SET b = 0, n = 11, f = 11.11, t = 'newtest1' where rowid = 1")
     assert exec(db, "select * from v") == snapshot(name="general-update-contents")
-    assert vec0_shadow_table_contents(db, "v") == snapshot(
-        name="general-update-shaodnw"
-    )
+    assert vec0_shadow_table_contents(db, "v") == snapshot(name="general-update-shaodnw")
 
     # string update #1: long string updated to long string
     exec(db, "UPDATE v SET t = '1234567890123-updated' where rowid = 3")
     assert exec(db, "select * from v") == snapshot(name="string-update-1-contents")
-    assert vec0_shadow_table_contents(db, "v") == snapshot(
-        name="string-update-1-shadow"
-    )
+    assert vec0_shadow_table_contents(db, "v") == snapshot(name="string-update-1-shadow")
 
     # string update #2: short string updated to short string
     exec(db, "UPDATE v SET t = 'test2-short' where rowid = 2")
     assert exec(db, "select * from v") == snapshot(name="string-update-2-contents")
-    assert vec0_shadow_table_contents(db, "v") == snapshot(
-        name="string-update-2-shadow"
-    )
+    assert vec0_shadow_table_contents(db, "v") == snapshot(name="string-update-2-shadow")
 
     # string update #3: short string updated to long string
     exec(db, "UPDATE v SET t = 'test2-long-long-long' where rowid = 2")
     assert exec(db, "select * from v") == snapshot(name="string-update-3-contents")
-    assert vec0_shadow_table_contents(db, "v") == snapshot(
-        name="string-update-3-shadow"
-    )
+    assert vec0_shadow_table_contents(db, "v") == snapshot(name="string-update-3-shadow")
 
     # string update #4: long string updated to short string
     exec(db, "UPDATE v SET t = 'test2-shortx' where rowid = 2")
     assert exec(db, "select * from v") == snapshot(name="string-update-4-contents")
-    assert vec0_shadow_table_contents(db, "v") == snapshot(
-        name="string-update-4-shadow"
-    )
+    assert vec0_shadow_table_contents(db, "v") == snapshot(name="string-update-4-shadow")
 
 
 def test_deletes(db, snapshot):
-    db.execute(
-        "create virtual table v using vec0(vector float[1], b boolean, n int, f float, t text, chunk_size=8)"
-    )
+    db.execute("create virtual table v using vec0(vector float[1], b boolean, n int, f float, t text, chunk_size=8)")
     INSERT = "insert into v(rowid, vector, b, n, f, t) values (?, ?, ?, ?, ?, ?)"
 
     assert exec(db, INSERT, [1, b"\x11\x11\x11\x11", 1, 1, 1.1, "test1"]) == snapshot()
     assert exec(db, INSERT, [2, b"\x22\x22\x22\x22", 1, 2, 2.2, "test2"]) == snapshot()
-    assert (
-        exec(db, INSERT, [3, b"\x33\x33\x33\x33", 1, 3, 3.3, "1234567890123"])
-        == snapshot()
-    )
+    assert exec(db, INSERT, [3, b"\x33\x33\x33\x33", 1, 3, 3.3, "1234567890123"]) == snapshot()
 
     assert exec(db, "select * from v") == snapshot()
     assert vec0_shadow_table_contents(db, "v") == snapshot()
@@ -265,12 +231,8 @@ def test_deletes(db, snapshot):
 
 
 def test_knn(db, snapshot):
-    db.execute(
-        "create virtual table v using vec0(vector float[1], name text, chunk_size=8)"
-    )
-    assert exec(
-        db, "select * from sqlite_master where type = 'table' order by name"
-    ) == snapshot(name="sqlite_master")
+    db.execute("create virtual table v using vec0(vector float[1], name text, chunk_size=8)")
+    assert exec(db, "select * from sqlite_master where type = 'table' order by name") == snapshot(name="sqlite_master")
     db.executemany(
         "insert into v(vector, name) values (?, ?)",
         [("[1]", "alex"), ("[2]", "brian"), ("[3]", "craig")],
@@ -289,13 +251,9 @@ def test_knn(db, snapshot):
 SUPPORTS_VTAB_IN = sqlite3.sqlite_version_info[1] >= 38
 
 
-@pytest.mark.skipif(
-    not SUPPORTS_VTAB_IN, reason="requires vtab `x in (...)` support in SQLite >=3.38"
-)
+@pytest.mark.skipif(not SUPPORTS_VTAB_IN, reason="requires vtab `x in (...)` support in SQLite >=3.38")
 def test_vtab_in(db, snapshot):
-    db.execute(
-        "create virtual table v using vec0(vector float[1], n int, t text, b boolean, f float, chunk_size=8)"
-    )
+    db.execute("create virtual table v using vec0(vector float[1], n int, t text, b boolean, f float, chunk_size=8)")
     db.executemany(
         "insert into v(rowid, vector, n, t, b, f) values (?, ?, ?, ?, ?, ?)",
         [
@@ -311,13 +269,13 @@ def test_vtab_in(db, snapshot):
     )
 
     # EVIDENCE-OF: V15248_32086
-    assert exec(
-        db, "select *  from v where vector match '[0]' and k = 8 and b in (1, 0)"
-    ) == snapshot(name="block-bool")
+    assert exec(db, "select *  from v where vector match '[0]' and k = 8 and b in (1, 0)") == snapshot(
+        name="block-bool"
+    )
 
-    assert exec(
-        db, "select *  from v where vector match '[0]' and k = 8 and f in (1.1, 0.0)"
-    ) == snapshot(name="block-float")
+    assert exec(db, "select *  from v where vector match '[0]' and k = 8 and f in (1.1, 0.0)") == snapshot(
+        name="block-float"
+    )
 
     assert exec(
         db,
@@ -339,9 +297,7 @@ def test_vtab_in(db, snapshot):
 
 
 def test_vtab_in_long_text(db, snapshot):
-    db.execute(
-        "create virtual table v using vec0(vector float[1], t text, chunk_size=8)"
-    )
+    db.execute("create virtual table v using vec0(vector float[1], t text, chunk_size=8)")
     data = [
         (1, "aaaa"),
         (2, "aaaaaaaaaaaa_aaa"),
@@ -423,9 +379,7 @@ def test_idxstr(db, snapshot):
 def eqp(db, sql):
     o = OrderedDict()
     o["sql"] = sql
-    o["plan"] = [
-        dict(row) for row in db.execute(f"explain query plan {sql}").fetchall()
-    ]
+    o["plan"] = [dict(row) for row in db.execute(f"explain query plan {sql}").fetchall()]
     for p in o["plan"]:
         # value is different on macos-aarch64 in github actions, not sure why
         del p["notused"]
@@ -579,9 +533,7 @@ def test_errors(db, snapshot):
     assert exec(db, "select * from v") == snapshot()
 
     # EVIDENCE-OF: V15466_32305
-    db.set_authorizer(
-        authorizer_deny_on(sqlite3.SQLITE_READ, "v_metadatatext00", "data")
-    )
+    db.set_authorizer(authorizer_deny_on(sqlite3.SQLITE_READ, "v_metadatatext00", "data"))
     assert exec(db, "select * from v") == snapshot()
 
 
@@ -617,9 +569,7 @@ def exec(db, sql, parameters=[]):
 def vec0_shadow_table_contents(db, v):
     shadow_tables = [
         row[0]
-        for row in db.execute(
-            "select name from sqlite_master where name like ? order by 1", [f"{v}_%"]
-        ).fetchall()
+        for row in db.execute("select name from sqlite_master where name like ? order by 1", [f"{v}_%"]).fetchall()
     ]
     o = {}
     for shadow_table in shadow_tables:

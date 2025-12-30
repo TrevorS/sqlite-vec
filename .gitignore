@@ -22,12 +22,11 @@ examples/dbpedia-openai
 examples/imdb
 examples/sotu
 
-sqlite-vec.h
 tmp/
-
-poetry.lock
 
 *.jsonl
 
 memstat.c
 memstat.*
+.hypothesis/
+.coverage

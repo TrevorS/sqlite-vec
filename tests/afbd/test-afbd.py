@@ -1,19 +1,18 @@
-import numpy as np
-from tqdm import tqdm
-from deepdiff import DeepDiff
-
-import tarfile
-import json
-from io import BytesIO
-import sqlite3
-from typing import List
-from struct import pack
-import time
-from pathlib import Path
 import argparse
+import json
+import sqlite3
+import tarfile
+import time
+from io import BytesIO
+from pathlib import Path
+from struct import pack
+
+import numpy as np
+from deepdiff import DeepDiff
+from tqdm import tqdm
 
 
-def serialize_float32(vector: List[float]) -> bytes:
+def serialize_float32(vector: list[float]) -> bytes:
     """Serializes a list of floats into the "raw bytes" format sqlite-vec expects"""
     return pack("%sf" % len(vector), *vector)
 
@@ -28,15 +27,9 @@ def build_command(file_path, metadata_set=None):
     with tarfile.open(file_path, "r:gz") as archive:
         for file in archive:
             if file.name == "./payloads.jsonl":
-                payloads = [
-                    json.loads(line)
-                    for line in archive.extractfile(file.name).readlines()
-                ]
+                payloads = [json.loads(line) for line in archive.extractfile(file.name).readlines()]
             if file.name == "./tests.jsonl":
-                tests = [
-                    json.loads(line)
-                    for line in archive.extractfile(file.name).readlines()
-                ]
+                tests = [json.loads(line) for line in archive.extractfile(file.name).readlines()]
             if file.name == "./vectors.npy":
                 f = BytesIO()
                 f.write(archive.extractfile(file.name).read())
@@ -97,9 +90,7 @@ def build_command(file_path, metadata_set=None):
 
         db.execute(create_sql)
 
-        for idx, (payload, vector) in enumerate(
-            tqdm(zip(payloads, vectors), total=len(payloads))
-        ):
+        for idx, (payload, vector) in enumerate(tqdm(zip(payloads, vectors), total=len(payloads))):
             params = [idx, vector]
             for c in metadata_columns:
                 params.append(payload[c])
@@ -117,10 +108,7 @@ def tests_command(file_path):
     db.load_extension("../../dist/vec0")
     db.enable_load_extension(False)
 
-    tests = [
-        json.loads(row["data"])
-        for row in db.execute("select data from tests").fetchall()
-    ]
+    tests = [json.loads(row["data"]) for row in db.execute("select data from tests").fetchall()]
 
     num_or_skips = 0
     num_1off_errors = 0
@@ -175,9 +163,7 @@ def tests_command(file_path):
         actual_closest_ids = [row["rowid"] for row in rows]
         matches = expected_closest_ids == actual_closest_ids
         if not matches:
-            diff = DeepDiff(
-                expected_closest_ids, actual_closest_ids, ignore_order=False
-            )
+            diff = DeepDiff(expected_closest_ids, actual_closest_ids, ignore_order=False)
             assert len(list(diff.keys())) == 1
             assert "values_changed" in diff.keys()
             keys_changed = list(diff["values_changed"].keys())
@@ -186,14 +172,8 @@ def tests_command(file_path):
                 a = int(akey.lstrip("root[").rstrip("]"))
                 b = int(bkey.lstrip("root[").rstrip("]"))
                 assert abs(a - b) == 1
-                assert (
-                    diff["values_changed"][akey]["new_value"]
-                    == diff["values_changed"][bkey]["old_value"]
-                )
-                assert (
-                    diff["values_changed"][akey]["old_value"]
-                    == diff["values_changed"][bkey]["new_value"]
-                )
+                assert diff["values_changed"][akey]["new_value"] == diff["values_changed"][bkey]["old_value"]
+                assert diff["values_changed"][akey]["old_value"] == diff["values_changed"][bkey]["new_value"]
             elif len(keys_changed) == 1:
                 v = int(keys_changed[0].lstrip("root[").rstrip("]"))
                 assert (v + 1) == len(expected_closest_ids)

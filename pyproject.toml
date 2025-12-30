@@ -1,0 +1,42 @@
+[project]
+name = "sqlite-vec"
+version = "0.1.7-alpha.2"
+description = "A SQLite extension for vector search"
+requires-python = ">=3.13"
+
+[dependency-groups]
+test = [
+    "pytest>=7.0",
+    "pytest-cov>=4.0",
+    "numpy>=1.24",
+    "syrupy>=4.0",
+    "hypothesis>=6.0",
+]
+dev = [
+    "ruff>=0.8",
+    "gcovr>=7.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test-*.py", "test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = ["-v", "--tb=short"]
+markers = ["slow: marks tests as slow"]
+filterwarnings = ["ignore::DeprecationWarning"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]
+ignore = [
+    "E501",  # line length handled by formatter
+    "E402",  # module level import not at top (common in tests)
+    "F841",  # local variable assigned but never used (common in tests)
+]
+
+[tool.ruff.format]
+quote-style = "double"

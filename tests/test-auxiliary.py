@@ -15,12 +15,8 @@ def test_constructor_limit(db, snapshot):
 
 
 def test_normal(db, snapshot):
-    db.execute(
-        "create virtual table v using vec0(a float[1], +name text, chunk_size=8)"
-    )
-    assert exec(db, "select * from sqlite_master order by name") == snapshot(
-        name="sqlite_master"
-    )
+    db.execute("create virtual table v using vec0(a float[1], +name text, chunk_size=8)")
+    assert exec(db, "select * from sqlite_master order by name") == snapshot(name="sqlite_master")
 
     db.execute("insert into v(a, name) values (?, ?)", [b"\x11\x11\x11\x11", "alex"])
     db.execute("insert into v(a, name) values (?, ?)", [b"\x22\x22\x22\x22", "brian"])
@@ -30,9 +26,7 @@ def test_normal(db, snapshot):
     assert vec0_shadow_table_contents(db, "v") == snapshot()
 
     db.execute("drop table v;")
-    assert exec(db, "select * from sqlite_master order by name") == snapshot(
-        name="sqlite_master post drop"
-    )
+    assert exec(db, "select * from sqlite_master order by name") == snapshot(name="sqlite_master post drop")
 
 
 def test_types(db, snapshot):
@@ -50,23 +44,15 @@ def test_types(db, snapshot):
     assert exec(db, "select * from v") == snapshot()
     INSERT = "insert into v(vector, aux_int, aux_float, aux_text, aux_blob) values (?, ?, ?, ?, ?)"
 
-    assert (
-        exec(db, INSERT, [b"\x11\x11\x11\x11", 1, 1.22, "text", b"blob"]) == snapshot()
-    )
+    assert exec(db, INSERT, [b"\x11\x11\x11\x11", 1, 1.22, "text", b"blob"]) == snapshot()
     assert exec(db, "select * from v") == snapshot()
 
     # TODO: integrity test transaction failures in shadow tables
     db.commit()
     # bad types
     db.execute("BEGIN")
-    assert (
-        exec(db, INSERT, [b"\x11\x11\x11\x11", "not int", 1.2, "text", b"blob"])
-        == snapshot()
-    )
-    assert (
-        exec(db, INSERT, [b"\x11\x11\x11\x11", 1, "not float", "text", b"blob"])
-        == snapshot()
-    )
+    assert exec(db, INSERT, [b"\x11\x11\x11\x11", "not int", 1.2, "text", b"blob"]) == snapshot()
+    assert exec(db, INSERT, [b"\x11\x11\x11\x11", 1, "not float", "text", b"blob"]) == snapshot()
     assert exec(db, INSERT, [b"\x11\x11\x11\x11", 1, 1.2, 1, b"blob"]) == snapshot()
     assert exec(db, INSERT, [b"\x11\x11\x11\x11", 1, 1.2, "text", 1]) == snapshot()
     db.execute("ROLLBACK")
@@ -77,9 +63,7 @@ def test_types(db, snapshot):
 
 
 def test_updates(db, snapshot):
-    db.execute(
-        "create virtual table v using vec0(vector float[1], +name text, chunk_size=8)"
-    )
+    db.execute("create virtual table v using vec0(vector float[1], +name text, chunk_size=8)")
     db.executemany(
         "insert into v(vector, name) values (?, ?)",
         [("[1]", "alex"), ("[2]", "brian"), ("[3]", "craig")],
@@ -93,9 +77,7 @@ def test_updates(db, snapshot):
 
 
 def test_deletes(db, snapshot):
-    db.execute(
-        "create virtual table v using vec0(vector float[1], +name text, chunk_size=8)"
-    )
+    db.execute("create virtual table v using vec0(vector float[1], +name text, chunk_size=8)")
     db.executemany(
         "insert into v(vector, name) values (?, ?)",
         [("[1]", "alex"), ("[2]", "brian"), ("[3]", "craig")],
@@ -115,9 +97,9 @@ def test_knn(db, snapshot):
         [("[1]", "alex"), ("[2]", "brian"), ("[3]", "craig")],
     )
     assert exec(db, "select * from v") == snapshot()
-    assert exec(
-        db, "select *, distance from v where vector match '[5]' and k = 10"
-    ) == snapshot(name="legal KNN w/ aux")
+    assert exec(db, "select *, distance from v where vector match '[5]' and k = 10") == snapshot(
+        name="legal KNN w/ aux"
+    )
 
     # EVIDENCE-OF: V25623_09693 No aux constraint allowed on KNN queries
     assert exec(
@@ -149,9 +131,7 @@ def exec(db, sql, parameters=[]):
 def vec0_shadow_table_contents(db, v):
     shadow_tables = [
         row[0]
-        for row in db.execute(
-            "select name from sqlite_master where name like ? order by 1", [f"{v}_%"]
-        ).fetchall()
+        for row in db.execute("select name from sqlite_master where name like ? order by 1", [f"{v}_%"]).fetchall()
     ]
     o = {}
     for shadow_table in shadow_tables:

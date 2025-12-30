@@ -19,9 +19,7 @@ def test_constructor_limit(db, snapshot):
 
 
 def test_normal(db, snapshot):
-    db.execute(
-        "create virtual table v using vec0(p1 int partition key, a float[1], chunk_size=8)"
-    )
+    db.execute("create virtual table v using vec0(p1 int partition key, a float[1], chunk_size=8)")
 
     db.execute("insert into v(rowid, p1, a) values (1, 100, X'11223344')")
     assert vec0_shadow_table_contents(db, "v") == snapshot(name="1 row")
@@ -32,46 +30,30 @@ def test_normal(db, snapshot):
 
 
 def test_types(db, snapshot):
-    db.execute(
-        "create virtual table v using vec0(p1 int partition key, a float[1], chunk_size=8)"
-    )
+    db.execute("create virtual table v using vec0(p1 int partition key, a float[1], chunk_size=8)")
 
     # EVIDENCE-OF: V11454_28292
-    assert exec(
-        db, "insert into v(p1, a) values(?, ?)", ["not int", b"\x11\x22\x33\x44"]
-    ) == snapshot(name="1. raises type error")
+    assert exec(db, "insert into v(p1, a) values(?, ?)", ["not int", b"\x11\x22\x33\x44"]) == snapshot(
+        name="1. raises type error"
+    )
 
     assert vec0_shadow_table_contents(db, "v") == snapshot(name="2. empty DB")
 
     # but allow NULLs
-    assert exec(
-        db, "insert into v(p1, a) values(?, ?)", [None, b"\x11\x22\x33\x44"]
-    ) == snapshot(name="3. allow nulls")
+    assert exec(db, "insert into v(p1, a) values(?, ?)", [None, b"\x11\x22\x33\x44"]) == snapshot(name="3. allow nulls")
 
-    assert vec0_shadow_table_contents(db, "v") == snapshot(
-        name="4. show NULL partition key"
-    )
+    assert vec0_shadow_table_contents(db, "v") == snapshot(name="4. show NULL partition key")
 
 
 def test_updates(db, snapshot):
-    db.execute(
-        "create virtual table v using vec0(p text partition key, a float[1], chunk_size=8)"
-    )
+    db.execute("create virtual table v using vec0(p text partition key, a float[1], chunk_size=8)")
 
-    db.execute(
-        "insert into v(rowid, p, a) values (?, ?, ?)", [1, "a", b"\x11\x11\x11\x11"]
-    )
-    db.execute(
-        "insert into v(rowid, p, a) values (?, ?, ?)", [2, "a", b"\x22\x22\x22\x22"]
-    )
-    db.execute(
-        "insert into v(rowid, p, a) values (?, ?, ?)", [3, "a", b"\x33\x33\x33\x33"]
-    )
+    db.execute("insert into v(rowid, p, a) values (?, ?, ?)", [1, "a", b"\x11\x11\x11\x11"])
+    db.execute("insert into v(rowid, p, a) values (?, ?, ?)", [2, "a", b"\x22\x22\x22\x22"])
+    db.execute("insert into v(rowid, p, a) values (?, ?, ?)", [3, "a", b"\x33\x33\x33\x33"])
 
     assert exec(db, "select * from v") == snapshot(name="1. Initial dataset")
-    assert exec(db, "update v set p = ? where rowid = ?", ["new", 1]) == snapshot(
-        name="2. update #1"
-    )
+    assert exec(db, "update v set p = ? where rowid = ?", ["new", 1]) == snapshot(name="2. update #1")
 
 
 class Row:
@@ -105,9 +87,7 @@ def exec(db, sql, parameters=[]):
 def vec0_shadow_table_contents(db, v):
     shadow_tables = [
         row[0]
-        for row in db.execute(
-            "select name from sqlite_master where name like ? order by 1", [f"{v}_%"]
-        ).fetchall()
+        for row in db.execute("select name from sqlite_master where name like ? order by 1", [f"{v}_%"]).fetchall()
     ]
     o = {}
     for shadow_table in shadow_tables:

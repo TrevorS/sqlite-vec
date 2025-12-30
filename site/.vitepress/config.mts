@@ -168,6 +168,7 @@ function sidebar(): DefaultTheme.SidebarItem[] {
         { text: "Vector formats", link: "/features/vector-formats" },
         { text: "KNN queries", link: "/features/knn" },
         { text: "vec0 Virtual Tables", link: "/features/vec0" },
+        { text: "IVF (ANN Search)", link: "/features/ivf" },
         //{ text: "Static blobs", link: "/features/static-blobs" },
       ],
     },
