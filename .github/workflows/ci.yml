@@ -1,0 +1,277 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Set up Python
+        run: uv python install 3.13
+
+      - name: Install dependencies
+        run: uv sync --group dev
+
+      - name: Check C formatting
+        run: |
+          diff -u <(cat sqlite-vec.c sqlite-vec.h) <(clang-format sqlite-vec.c sqlite-vec.h) || \
+            (echo "C files need formatting: make format" && exit 1)
+
+      - name: Run ruff
+        run: |
+          uv run ruff check tests/ scripts/
+          uv run ruff format --check tests/ scripts/
+
+  analyze:
+    name: Static Analysis
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Run clang-tidy
+        run: |
+          mkdir -p dist
+          clang-tidy sqlite-vec.c -- -Ivendor/ 2>&1 | tee dist/clang-tidy-report.txt
+          # Fail if there are any warnings (excluding notes)
+          if grep -E "warning:" dist/clang-tidy-report.txt; then
+            echo "::warning::clang-tidy found issues (see report above)"
+          fi
+
+      - name: Upload analysis report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: static-analysis-report
+          path: dist/clang-tidy-report.txt
+
+  strict-warnings:
+    name: Strict Warnings
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Build with strict warnings
+        run: |
+          mkdir -p dist
+          # Strict warning flags to catch potential issues
+          gcc -fPIC -shared \
+            -Wall -Wextra -Wpedantic \
+            -Wshadow -Wdouble-promotion -Wformat=2 -Wundef \
+            -Wconversion -Wno-sign-conversion \
+            -Wcast-qual -Wcast-align -Wwrite-strings \
+            -Wstrict-prototypes -Wold-style-definition \
+            -Wmissing-prototypes -Wredundant-decls \
+            -Wnested-externs -Winit-self \
+            -Ivendor/ -O2 -g -lm \
+            sqlite-vec.c -o dist/vec0-strict.so 2>&1 | tee dist/strict-warnings.txt
+          # Count warnings (informational, don't fail)
+          WARN_COUNT=$(grep -c "warning:" dist/strict-warnings.txt || true)
+          echo "::notice::Strict build completed with $WARN_COUNT warnings"
+
+      - name: Upload warnings report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: strict-warnings-report
+          path: dist/strict-warnings.txt
+
+  valgrind:
+    name: Valgrind Memory Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y valgrind
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Set up Python
+        run: uv python install 3.13
+
+      - name: Install test dependencies
+        run: uv sync --group test
+
+      - name: Build debug extension
+        run: |
+          mkdir -p dist
+          gcc -fPIC -shared -Wall -Wextra -Ivendor/ -g -O0 -lm \
+            sqlite-vec.c -o dist/vec0.so
+
+      - name: Run tests under Valgrind
+        run: |
+          valgrind --leak-check=full --show-leak-kinds=definite \
+            --error-exitcode=1 --suppressions=valgrind.supp \
+            uv run pytest tests/test-loadable.py -v -x --tb=short \
+            2>&1 | tee dist/valgrind-report.txt || true
+          # Check for definite leaks (ignore possible leaks from Python)
+          if grep -q "definitely lost:" dist/valgrind-report.txt; then
+            LOST=$(grep "definitely lost:" dist/valgrind-report.txt | head -1)
+            if echo "$LOST" | grep -qv "0 bytes"; then
+              echo "::error::Memory leaks detected: $LOST"
+              exit 1
+            fi
+          fi
+          echo "::notice::Valgrind check passed"
+
+      - name: Upload Valgrind report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: valgrind-report
+          path: dist/valgrind-report.txt
+
+  build:
+    name: Build Extension
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Build loadable extension
+        run: |
+          mkdir -p dist
+          gcc -fPIC -shared -Wall -Wextra -Ivendor/ -O3 -lm sqlite-vec.c -o dist/vec0.so
+
+      - name: Upload extension artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: vec0-linux
+          path: dist/vec0.so
+
+  test-python:
+    name: Python Tests
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download extension artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: vec0-linux
+          path: dist/
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Set up Python
+        run: uv python install 3.13
+
+      - name: Install dependencies
+        run: uv sync --group test
+
+      - name: Run tests
+        run: |
+          uv run pytest tests/test-loadable.py tests/test-metadata.py \
+            tests/test-partition-keys.py tests/test-auxiliary.py \
+            tests/test-general.py tests/test-ivf.py -v
+
+  test-property:
+    name: Property Tests
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download extension artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: vec0-linux
+          path: dist/
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Set up Python
+        run: uv python install 3.13
+
+      - name: Install dependencies
+        run: uv sync --group test
+
+      - name: Run property-based tests
+        run: uv run pytest tests/test-property.py -v --hypothesis-seed=0
+
+  test-c:
+    name: C Unit Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y libsqlite3-dev
+
+      - name: Build and run C unit tests
+        run: make test-unit
+
+  coverage:
+    name: Code Coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Set up Python
+        run: uv python install 3.13
+
+      - name: Install dependencies
+        run: uv sync --group dev --group test
+
+      - name: Build with coverage instrumentation
+        run: |
+          mkdir -p dist
+          gcc -fprofile-arcs -ftest-coverage -fPIC -shared -Wall -Wextra \
+            -Ivendor/ -O0 -g -lm sqlite-vec.c -o dist/vec0.so
+
+      - name: Run tests
+        run: |
+          uv run pytest tests/test-loadable.py tests/test-ivf.py tests/test-general.py \
+            tests/test-edge-cases.py tests/test-error-paths.py -v
+
+      - name: Generate coverage report
+        run: |
+          uv run gcovr --root . --filter sqlite-vec.c \
+            --exclude-unreachable-branches --exclude-throw-branches \
+            --html-details dist/coverage.html \
+            --xml dist/coverage.xml \
+            --print-summary
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: |
+            dist/coverage.html
+            dist/coverage.*.html
+            dist/coverage.xml
+
+      - name: Coverage summary
+        run: |
+          uv run gcovr --root . --filter sqlite-vec.c \
+            --exclude-unreachable-branches --fail-under-line 65

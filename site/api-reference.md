@@ -629,7 +629,66 @@ from vec_npy_each(
 
 ```
 
-## Meta {#meta} 
+## IVF Functions {#ivf}
+
+Functions for working with IVF (Inverted File Index) approximate nearest neighbor search.
+See the [IVF documentation](/features/ivf) for a complete guide.
+
+### `vec0_train(table_name)` {#vec0_train}
+
+Trains the IVF index for a `vec0` virtual table. This runs k-means clustering on all vectors
+to create centroids and assign vectors to clusters.
+
+The table must have been created with the `ivf_nlist` option.
+
+```sql
+create virtual table vec_docs using vec0(
+  embedding float[768],
+  ivf_nlist=100
+);
+
+-- Insert vectors first
+insert into vec_docs(rowid, embedding) values (1, :vec1), (2, :vec2);
+
+-- Then train the index
+select vec0_train('vec_docs');
+-- 1
+
+
+```
+
+### `vec0_is_trained(table_name)` {#vec0_is_trained}
+
+Returns whether the IVF index for a `vec0` table has been trained.
+
+```sql
+select vec0_is_trained('vec_docs');
+-- 0 (not trained)
+
+select vec0_train('vec_docs');
+
+select vec0_is_trained('vec_docs');
+-- 1 (trained)
+
+
+```
+
+### `vec0_set_option(table_name, option, value)` {#vec0_set_option}
+
+Sets a runtime option for a `vec0` virtual table. Currently supports setting `ivf_nprobe`.
+
+```sql
+-- Set default nprobe to 50 for all queries
+select vec0_set_option('vec_docs', 'ivf_nprobe', 50);
+-- 1
+
+select vec0_set_option('vec_docs', 'invalid', 10);
+-- ❌ unknown option: invalid
+
+
+```
+
+## Meta {#meta}
 
 Helper functions to debug `sqlite-vec` installations.
 

@@ -10,3 +10,12 @@ int min_idx(
   // output number of elements
   int32_t k
 );
+
+// Parse a partition key column definition like "user_id integer partition key"
+int vec0_parse_partition_key_definition(
+  const char *source,
+  int source_length,
+  const char **out_column_name,
+  int *out_column_name_length,
+  int *out_column_type
+);

@@ -1,4 +1,5 @@
 #include "../sqlite-vec.h"
+#include "sqlite-vec-internal.h"
 #include <stdio.h>
 #include <string.h>
 #include <assert.h>
@@ -24,7 +25,7 @@ void test_vec0_parse_partition_key_definition() {
     {"document_id text partition keyy", SQLITE_EMPTY, "", 0},
   };
   for(int i = 0; i < countof(suite); i++) {
-    char * out_column_name;
+    const char * out_column_name;
     int out_column_name_length;
     int out_column_type;
     int rc;

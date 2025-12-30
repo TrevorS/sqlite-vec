@@ -1,0 +1,32 @@
+---
+# Clang-Tidy configuration for sqlite-vec
+# Run with: clang-tidy sqlite-vec.c -- -Ivendor/
+
+Checks: >
+  -*,
+  bugprone-*,
+  -bugprone-easily-swappable-parameters,
+  -bugprone-narrowing-conversions,
+  clang-analyzer-*,
+  -clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling,
+  misc-redundant-expression,
+  performance-*,
+  -performance-no-int-to-ptr,
+  portability-*,
+  readability-braces-around-statements,
+  readability-duplicate-include,
+  readability-misleading-indentation,
+  readability-redundant-control-flow,
+  readability-redundant-preprocessor,
+
+WarningsAsErrors: ''
+
+HeaderFilterRegex: 'sqlite-vec\.h'
+
+CheckOptions:
+  - key: bugprone-assert-side-effect.AssertMacros
+    value: assert,SQLITE_ASSERT
+  - key: bugprone-sizeof-expression.WarnOnSizeOfPointerToAggregate
+    value: false
+  - key: performance-unnecessary-value-param.AllowedTypes
+    value: 'sqlite3_context*;sqlite3_value**'

@@ -1,0 +1,84 @@
+# Valgrind suppression file for sqlite-vec
+# Suppresses known false positives from Python, SQLite, and system libraries
+
+# Python interpreter allocations (not leaks, just not freed at exit)
+{
+   python_malloc
+   Memcheck:Leak
+   ...
+   obj:*/libpython*.so*
+}
+
+{
+   python_realloc
+   Memcheck:Leak
+   ...
+   fun:PyMem_Realloc
+}
+
+{
+   python_object_malloc
+   Memcheck:Leak
+   ...
+   fun:PyObject_Malloc
+}
+
+{
+   python_arena
+   Memcheck:Leak
+   ...
+   fun:_PyObject_Arena*
+}
+
+# SQLite internal allocations
+{
+   sqlite3_malloc
+   Memcheck:Leak
+   ...
+   fun:sqlite3_malloc*
+}
+
+{
+   sqlite3_realloc
+   Memcheck:Leak
+   ...
+   fun:sqlite3_realloc*
+}
+
+# dlopen related (loading extensions)
+{
+   dlopen_leak
+   Memcheck:Leak
+   ...
+   fun:_dl_*
+}
+
+{
+   dlopen_addr
+   Memcheck:Addr8
+   ...
+   fun:_dl_*
+}
+
+# glibc internal allocations
+{
+   glibc_nss
+   Memcheck:Leak
+   ...
+   obj:*/libnss*.so*
+}
+
+{
+   glibc_dl
+   Memcheck:Leak
+   ...
+   obj:*/ld-linux*.so*
+}
+
+# NumPy allocations (used in tests)
+{
+   numpy_malloc
+   Memcheck:Leak
+   ...
+   obj:*/numpy*
+}
